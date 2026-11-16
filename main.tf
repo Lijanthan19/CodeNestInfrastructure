@@ -1,10 +1,16 @@
-# Get the latest Ubuntu 24.04 AMI automatically
+# =========================================================
+# GET LATEST UBUNTU 24.04 AMI AUTOMATICALLY
+# =========================================================
+
 data "aws_ssm_parameter" "ubuntu_ami" {
   name = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 }
 
 
-# Security Group
+# =========================================================
+# SECURITY GROUP
+# =========================================================
+
 resource "aws_security_group" "codenest" {
   name        = "codenest-security-group"
   description = "Allow SSH and CodeNest application traffic"
@@ -41,30 +47,24 @@ resource "aws_security_group" "codenest" {
 }
 
 
-# Create EC2 Instance
-/*resource "aws_instance" "codenest" {
-  ami           = data.aws_ssm_parameter.ubuntu_ami.value
-  instance_type = var.instance_type
-
-  vpc_security_group_ids = [
-    aws_security_group.codenest.id
-  ]
-
-  tags = {
-    Name = "CodeNest-Server"
-  }
-}*/
+# =========================================================
+# EC2 INSTANCE
+# =========================================================
 
 resource "aws_instance" "codenest" {
   ami           = data.aws_ssm_parameter.ubuntu_ami.value
   instance_type = var.instance_type
 
+  # Attach IAM Instance Profile
+  # This allows EC2 to communicate with AWS Systems Manager
   iam_instance_profile = aws_iam_instance_profile.codenest.name
 
+  # Attach Security Group
   vpc_security_group_ids = [
     aws_security_group.codenest.id
   ]
 
+  # Install Docker automatically when EC2 starts
   user_data = <<-EOF
     #!/bin/bash
 
@@ -84,7 +84,10 @@ resource "aws_instance" "codenest" {
 }
 
 
-# Create Elastic IP
+# =========================================================
+# ELASTIC IP
+# =========================================================
+
 resource "aws_eip" "codenest" {
   domain = "vpc"
 
@@ -94,13 +97,20 @@ resource "aws_eip" "codenest" {
 }
 
 
-# Attach Elastic IP to EC2
+# =========================================================
+# ATTACH ELASTIC IP TO EC2
+# =========================================================
+
 resource "aws_eip_association" "codenest" {
   instance_id   = aws_instance.codenest.id
   allocation_id = aws_eip.codenest.id
 }
 
-# Crete IAM role
+
+# =========================================================
+# IAM ROLE FOR EC2 / SSM
+# =========================================================
+
 resource "aws_iam_role" "codenest_ssm_role" {
   name = "CodeNest-EC2-SSM-Role"
 
@@ -126,21 +136,31 @@ resource "aws_iam_role" "codenest_ssm_role" {
 }
 
 
+# =========================================================
+# ATTACH SSM POLICY TO EC2 IAM ROLE
+# =========================================================
 
-#Attach policy to SSM
 resource "aws_iam_role_policy_attachment" "codenest_ssm" {
   role       = aws_iam_role.codenest_ssm_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-#Create Instance profile 
+
+# =========================================================
+# CREATE IAM INSTANCE PROFILE
+# =========================================================
+
 resource "aws_iam_instance_profile" "codenest" {
   name = "CodeNest-EC2-Instance-Profile"
 
   role = aws_iam_role.codenest_ssm_role.name
 }
 
-#Create the GitHub OIDC Provider
+
+# =========================================================
+# CREATE GITHUB OIDC PROVIDER
+# =========================================================
+
 resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 
@@ -149,40 +169,11 @@ resource "aws_iam_openid_connect_provider" "github" {
   ]
 }
 
-#Create the IAM Role for GitHub actions
-/*resource "aws_iam_role" "github_actions" {
-  name = "CodeNest-GitHub-Actions-Role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
+# =========================================================
+# IAM ROLE FOR GITHUB ACTIONS
+# =========================================================
 
-    Statement = [
-      {
-        Effect = "Allow"
-
-        Principal = {
-          Federated = aws_iam_openid_connect_provider.github.arn
-        }
-
-        Action = "sts:AssumeRoleWithWebIdentity"
-
-        Condition = {
-          StringEquals = {
-            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          }
-
-          StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:Lijanthan19/CodeNestGH:*"
-          }
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name = "CodeNest-GitHub-Actions-Role"
-  }
-}*/
 resource "aws_iam_role" "github_actions" {
   name = "CodeNest-GitHub-Actions-Role"
 
@@ -202,6 +193,9 @@ resource "aws_iam_role" "github_actions" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+
+            # Allow GitHub Actions only from the main branch
+            # of the Lijanthan19/CodeNestGH repository
             "token.actions.githubusercontent.com:sub" = "repo:Lijanthan19/CodeNestGH:ref:refs/heads/main"
           }
         }
@@ -214,7 +208,11 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
-#Give GitHub Actions permission to use SSM
+
+# =========================================================
+# GIVE GITHUB ACTIONS PERMISSION TO USE SSM
+# =========================================================
+
 resource "aws_iam_role_policy_attachment" "github_actions_ssm" {
   role       = aws_iam_role.github_actions.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
